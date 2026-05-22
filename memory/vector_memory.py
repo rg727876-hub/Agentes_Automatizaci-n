@@ -2,51 +2,53 @@ import uuid
 import json
 from datetime import datetime
 import chromadb
-from chromadb import EmbeddingFunction, Documents, Embeddings
-
-
-class GeminiEmbeddingFunction(EmbeddingFunction):
-    """Usa la API de Gemini para generar embeddings, sin descargar modelos locales."""
-
-    def __init__(self, api_key: str, model: str = "gemini-embedding-001"):
-        from google import genai
-        self._client = genai.Client(api_key=api_key)
-        self._model = model
-
-    def __call__(self, input: Documents) -> Embeddings:
-        result = []
-        for text in input:
-            response = self._client.models.embed_content(
-                model=self._model,
-                contents=text,
-            )
-            result.append(list(response.embeddings[0].values))
-        return result
 
 
 class VectorMemory:
     """
-    Memoria vectorial persistente usando ChromaDB + embeddings de Gemini.
+    Memoria vectorial persistente usando ChromaDB con embeddings locales.
 
     Almacena cada interacción (consulta + respuesta) como un vector semántico.
     En la próxima sesión busca conversaciones similares para darle contexto
     al orquestador, haciendo que el sistema recuerde consultas previas.
     """
 
-    def __init__(self, persist_dir: str = "./vector_store", embedding_function=None):
+    def __init__(self, persist_dir: str = "./vector_store"):
         self.client = chromadb.PersistentClient(path=persist_dir)
-        self.ef = embedding_function
+        self._init_collections()
 
-        self.conversations = self.client.get_or_create_collection(
-            name="conversations",
-            embedding_function=self.ef,
-            metadata={"hnsw:space": "cosine"},
-        )
-        self.product_index = self.client.get_or_create_collection(
-            name="product_index",
-            embedding_function=self.ef,
-            metadata={"hnsw:space": "cosine"},
-        )
+    def _init_collections(self):
+        """Inicializa colecciones, recreándolas si hay incompatibilidad de embeddings."""
+        try:
+            self.conversations = self.client.get_or_create_collection(
+                name="conversations",
+                metadata={"hnsw:space": "cosine"},
+            )
+            self.product_index = self.client.get_or_create_collection(
+                name="product_index",
+                metadata={"hnsw:space": "cosine"},
+            )
+            # Probe to detect dimension mismatch from a previous embedding model
+            if self.conversations.count() > 0:
+                self.conversations.query(query_texts=["test"], n_results=1)
+        except Exception:
+            # Dimension mismatch or corrupt index — start fresh
+            try:
+                self.client.delete_collection("conversations")
+            except Exception:
+                pass
+            try:
+                self.client.delete_collection("product_index")
+            except Exception:
+                pass
+            self.conversations = self.client.get_or_create_collection(
+                name="conversations",
+                metadata={"hnsw:space": "cosine"},
+            )
+            self.product_index = self.client.get_or_create_collection(
+                name="product_index",
+                metadata={"hnsw:space": "cosine"},
+            )
 
     # ------------------------------------------------------------------
     # Conversaciones
@@ -71,11 +73,14 @@ class VectorMemory:
         count = self.conversations.count()
         if count == 0:
             return ""
-        results = self.conversations.query(
-            query_texts=[query],
-            n_results=min(n_results, count),
-            include=["documents", "metadatas", "distances"],
-        )
+        try:
+            results = self.conversations.query(
+                query_texts=[query],
+                n_results=min(n_results, count),
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception:
+            return ""
         if not results["documents"] or not results["documents"][0]:
             return ""
         relevant = []
@@ -106,7 +111,7 @@ class VectorMemory:
         return entries[:limit]
 
     # ------------------------------------------------------------------
-    # Indice de productos
+    # Índice de productos
     # ------------------------------------------------------------------
 
     def index_products(self, products: list):
@@ -133,11 +138,14 @@ class VectorMemory:
         count = self.product_index.count()
         if count == 0:
             return []
-        results = self.product_index.query(
-            query_texts=[query],
-            n_results=min(n_results, count),
-            include=["documents", "metadatas", "distances"],
-        )
+        try:
+            results = self.product_index.query(
+                query_texts=[query],
+                n_results=min(n_results, count),
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception:
+            return []
         if not results["documents"] or not results["documents"][0]:
             return []
         return [
@@ -150,7 +158,7 @@ class VectorMemory:
         ]
 
     # ------------------------------------------------------------------
-    # Estadisticas y mantenimiento
+    # Estadísticas y mantenimiento
     # ------------------------------------------------------------------
 
     def get_stats(self) -> dict:
@@ -163,6 +171,5 @@ class VectorMemory:
         self.client.delete_collection("conversations")
         self.conversations = self.client.get_or_create_collection(
             name="conversations",
-            embedding_function=self.ef,
             metadata={"hnsw:space": "cosine"},
         )

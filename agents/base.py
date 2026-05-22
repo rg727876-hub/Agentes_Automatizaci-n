@@ -1,28 +1,29 @@
 import re
 import time
 from google.genai import types
-from google.genai.errors import ClientError
+from google.genai.errors import ClientError, ServerError
 from config import MAX_ITERATIONS, MAX_RETRIES
 
 
 def _gemini_call(func, *args, **kwargs):
-    """Llama a la API de Gemini con reintentos automáticos ante errores 429."""
+    """Llama a la API de Gemini con reintentos automáticos ante errores 429/503."""
     for attempt in range(MAX_RETRIES):
         try:
             return func(*args, **kwargs)
-        except ClientError as e:
-            if "429" in str(e):
-                match = re.search(r"retry in (\d+(?:\.\d+)?)s", str(e))
-                wait = int(float(match.group(1))) + 2 if match else 30 * (attempt + 1)
-                print(f"\n  [Rate limit] Esperando {wait}s antes de reintentar...")
+        except (ClientError, ServerError) as e:
+            error_str = str(e)
+            if "429" in error_str or "503" in error_str or "UNAVAILABLE" in error_str:
+                match = re.search(r"retry in (\d+(?:\.\d+)?)s", error_str)
+                wait = min(int(float(match.group(1))) + 2 if match else 10 * (attempt + 1), 30)
+                print(f"\n  [API no disponible] Esperando {wait}s antes de reintentar...")
                 time.sleep(wait)
                 if attempt == MAX_RETRIES - 1:
-                    raise
+                    return None
             else:
                 raise
-    raise RuntimeError("Max retries exceeded")
+    return None
 
-# Mapeo de tipos JSON Schema → tipos Gemini
+
 _TYPE_MAP = {
     "string": "STRING",
     "integer": "INTEGER",
@@ -99,26 +100,28 @@ class BaseAgent:
                 ),
             )
 
+            if not response or not response.candidates:
+                return "Lo siento, el servicio no está disponible en este momento. Por favor intenta de nuevo."
+
             candidate = response.candidates[0]
+            if not candidate.content or not candidate.content.parts:
+                return "Lo siento, recibí una respuesta vacía. Por favor intenta de nuevo."
+
             parts = candidate.content.parts
 
-            # Separar function calls de texto
             func_calls = [
                 p.function_call for p in parts
                 if hasattr(p, "function_call") and p.function_call and p.function_call.name
             ]
 
             if not func_calls:
-                # Sin function calls → respuesta final
                 for p in parts:
                     if hasattr(p, "text") and p.text:
                         return p.text
                 return ""
 
-            # Agregar respuesta del modelo al historial
             contents.append(candidate.content)
 
-            # Ejecutar herramientas y devolver resultados
             response_parts = []
             for fc in func_calls:
                 result = self._execute_tool(fc.name, dict(fc.args))

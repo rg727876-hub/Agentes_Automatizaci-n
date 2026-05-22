@@ -4,7 +4,7 @@ from database import get_connection
 
 
 def create_purchase_order(db_path: str, supplier_id: int, product_id: int,
-                           quantity: int, unit_cost: float, notes: str = "") -> str:
+                        quantity: int, unit_cost: float, notes: str = "") -> str:
     conn = get_connection(db_path)
     try:
         supplier = conn.execute("SELECT lead_time_days FROM suppliers WHERE id = ?", (supplier_id,)).fetchone()

@@ -1,3 +1,3 @@
-from .vector_memory import VectorMemory, GeminiEmbeddingFunction
+from .vector_memory import VectorMemory
 
-__all__ = ["VectorMemory", "GeminiEmbeddingFunction"]
+__all__ = ["VectorMemory"]
