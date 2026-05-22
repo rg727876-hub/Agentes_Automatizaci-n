@@ -1,0 +1,33 @@
+# Secretos - NUNCA subir al repo
+.env
+
+# Base de datos local (se regenera sola con python main.py)
+inventory.db
+
+# Memoria vectorial (se regenera sola)
+vector_store/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+.env/
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Claude Code
+.claude/
