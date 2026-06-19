@@ -1,7 +1,7 @@
 # Secretos - NUNCA subir al repo
 .env
 
-# Base de datos local (se regenera sola con python main.py)
+# Base de datos local SQLite antigua (ya no se usa; ahora es Supabase)
 inventory.db
 
 # Memoria vectorial (se regenera sola)

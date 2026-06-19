@@ -82,7 +82,7 @@ def calculate_days_of_stock_remaining(db_path: str, product_id: int = None) -> s
                 "ELSE 999 END as days_remaining "
                 "FROM products p JOIN inventory i ON p.id = i.product_id "
                 "LEFT JOIN sales s ON p.id = s.product_id AND s.sale_date >= ? "
-                "WHERE p.id = ? GROUP BY p.id",
+                "WHERE p.id = ? GROUP BY p.id, i.quantity",
                 (start_date, product_id)
             ).fetchall()
         else:
@@ -94,7 +94,7 @@ def calculate_days_of_stock_remaining(db_path: str, product_id: int = None) -> s
                 "ELSE 999 END as days_remaining "
                 "FROM products p JOIN inventory i ON p.id = i.product_id "
                 "LEFT JOIN sales s ON p.id = s.product_id AND s.sale_date >= ? "
-                "GROUP BY p.id ORDER BY days_remaining ASC",
+                "GROUP BY p.id, i.quantity ORDER BY days_remaining ASC",
                 (start_date,)
             ).fetchall()
         return json.dumps([{
@@ -112,16 +112,18 @@ def identify_stockout_risk(db_path: str, risk_days: int = 14) -> str:
     try:
         start_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
         rows = conn.execute(
-            "SELECT p.id, p.sku, p.name, p.category, i.quantity as current_stock, "
-            "p.reorder_point, p.reorder_quantity, "
-            "COALESCE(CAST(SUM(s.quantity) AS REAL) / 30, 0) as avg_daily_sales, "
-            "CASE WHEN COALESCE(CAST(SUM(s.quantity) AS REAL) / 30, 0) > 0 "
-            "THEN CAST(i.quantity AS REAL) / (CAST(SUM(s.quantity) AS REAL) / 30) "
-            "ELSE 999 END as days_remaining "
-            "FROM products p JOIN inventory i ON p.id = i.product_id "
-            "LEFT JOIN sales s ON p.id = s.product_id AND s.sale_date >= ? "
-            "GROUP BY p.id "
-            "HAVING days_remaining <= ? OR current_stock = 0 "
+            "SELECT * FROM ("
+            "  SELECT p.id, p.sku, p.name, p.category, i.quantity as current_stock, "
+            "  p.reorder_point, p.reorder_quantity, "
+            "  COALESCE(CAST(SUM(s.quantity) AS REAL) / 30, 0) as avg_daily_sales, "
+            "  CASE WHEN COALESCE(CAST(SUM(s.quantity) AS REAL) / 30, 0) > 0 "
+            "  THEN CAST(i.quantity AS REAL) / (CAST(SUM(s.quantity) AS REAL) / 30) "
+            "  ELSE 999 END as days_remaining "
+            "  FROM products p JOIN inventory i ON p.id = i.product_id "
+            "  LEFT JOIN sales s ON p.id = s.product_id AND s.sale_date >= ? "
+            "  GROUP BY p.id, i.quantity"
+            ") t "
+            "WHERE days_remaining <= ? OR current_stock = 0 "
             "ORDER BY days_remaining ASC",
             (start_date, risk_days)
         ).fetchall()
@@ -146,7 +148,7 @@ def get_seasonal_analysis(db_path: str, product_id: int) -> str:
         if not product:
             return json.dumps({"error": "Producto no encontrado"})
         weekly = conn.execute(
-            "SELECT strftime('%W', sale_date) as week_number, "
+            "SELECT to_char(sale_date::date, 'WW') as week_number, "
             "SUM(quantity) as weekly_sales, AVG(quantity) as avg_daily "
             "FROM sales WHERE product_id = ? "
             "GROUP BY week_number ORDER BY week_number",

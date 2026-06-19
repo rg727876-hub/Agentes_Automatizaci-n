@@ -1,5 +1,4 @@
 import json
-import sqlite3
 from database import get_connection
 
 
@@ -82,7 +81,7 @@ def update_stock_quantity(db_path: str, product_id: int, new_quantity: int, reas
         if not old:
             return json.dumps({"error": "Producto no encontrado en inventario"})
         conn.execute(
-            "UPDATE inventory SET quantity = ?, last_updated = datetime('now') WHERE product_id = ?",
+            "UPDATE inventory SET quantity = ?, last_updated = to_char(now(),'YYYY-MM-DD HH24:MI:SS') WHERE product_id = ?",
             (new_quantity, product_id)
         )
         conn.commit()

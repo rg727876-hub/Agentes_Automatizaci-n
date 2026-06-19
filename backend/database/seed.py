@@ -1,106 +1,14 @@
-import sqlite3
+"""Datos de ejemplo (seed).
+
+Se cargan una sola vez: si la tabla products ya tiene filas, no hace nada.
+Vive en Python (no en SQL) porque genera 90 días de ventas y costos de
+proveedor de forma aleatoria.
+"""
 import random
 from datetime import datetime, timedelta
 
 
-def setup_database(db_path: str):
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    _create_tables(conn)
-    _seed_data(conn)
-    conn.close()
-
-
-def get_connection(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
-def _create_tables(conn: sqlite3.Connection):
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sku TEXT UNIQUE NOT NULL,
-            name TEXT NOT NULL,
-            category TEXT NOT NULL,
-            unit_price REAL NOT NULL,
-            cost_price REAL NOT NULL,
-            unit_of_measure TEXT DEFAULT 'unidad',
-            reorder_point INTEGER DEFAULT 10,
-            reorder_quantity INTEGER DEFAULT 50,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS inventory (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER NOT NULL REFERENCES products(id),
-            quantity INTEGER NOT NULL DEFAULT 0,
-            reserved_quantity INTEGER DEFAULT 0,
-            warehouse_location TEXT,
-            last_updated TEXT DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS suppliers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            contact_name TEXT,
-            email TEXT,
-            phone TEXT,
-            country TEXT DEFAULT 'Chile',
-            lead_time_days INTEGER DEFAULT 7,
-            reliability_score REAL DEFAULT 0.9,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-
-        CREATE TABLE IF NOT EXISTS product_suppliers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER NOT NULL REFERENCES products(id),
-            supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
-            unit_cost REAL NOT NULL,
-            min_order_quantity INTEGER DEFAULT 1,
-            is_preferred INTEGER DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS sales (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER NOT NULL REFERENCES products(id),
-            quantity INTEGER NOT NULL,
-            unit_price REAL NOT NULL,
-            total_amount REAL NOT NULL,
-            sale_date TEXT NOT NULL,
-            channel TEXT DEFAULT 'tienda'
-        );
-
-        CREATE TABLE IF NOT EXISTS purchase_orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
-            product_id INTEGER NOT NULL REFERENCES products(id),
-            quantity INTEGER NOT NULL,
-            unit_cost REAL NOT NULL,
-            total_cost REAL NOT NULL,
-            status TEXT DEFAULT 'pendiente',
-            order_date TEXT DEFAULT (datetime('now')),
-            expected_delivery TEXT,
-            received_date TEXT,
-            notes TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS inventory_alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER NOT NULL REFERENCES products(id),
-            alert_type TEXT NOT NULL,
-            message TEXT NOT NULL,
-            is_resolved INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now'))
-        );
-    """)
-    conn.commit()
-
-
-def _seed_data(conn: sqlite3.Connection):
+def seed_data(conn):
     existing = conn.execute("SELECT COUNT(*) FROM products").fetchone()[0]
     if existing > 0:
         return

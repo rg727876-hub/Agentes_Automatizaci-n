@@ -7,7 +7,7 @@ from google import genai
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
 
-from config import GEMINI_API_KEY, DB_PATH
+from config import GEMINI_API_KEY, DB_PATH, DATABASE_URL, VECTOR_STORE_DIR
 from database import setup_database, get_connection
 from agents import OrchestratorAgent
 from memory import VectorMemory
@@ -110,14 +110,19 @@ def main():
         print("Obtén tu clave gratis en: https://aistudio.google.com/apikey")
         sys.exit(1)
 
+    if not DATABASE_URL:
+        print("ERROR: Configura tu DATABASE_URL en el archivo .env")
+        print("Supabase -> Project Settings -> Database -> Connection string (URI)")
+        sys.exit(1)
+
     print(BANNER)
 
-    print("Inicializando base de datos SQLite...", end=" ", flush=True)
+    print("Conectando a base de datos Supabase (PostgreSQL)...", end=" ", flush=True)
     setup_database(DB_PATH)
     print("OK")
 
     print("Inicializando memoria vectorial ChromaDB...", end=" ", flush=True)
-    memory = VectorMemory(persist_dir="./vector_store")
+    memory = VectorMemory(persist_dir=VECTOR_STORE_DIR)
     products = _load_products_for_index(DB_PATH)
     memory.index_products(products)
     stats = memory.get_stats()

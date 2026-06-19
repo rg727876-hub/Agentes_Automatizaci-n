@@ -17,13 +17,15 @@ def create_purchase_order(db_path: str, supplier_id: int, product_id: int,
         expected_delivery = (datetime.now() + timedelta(days=supplier[0])).strftime("%Y-%m-%d")
         cursor = conn.execute(
             "INSERT INTO purchase_orders (supplier_id, product_id, quantity, unit_cost, total_cost, "
-            "status, order_date, expected_delivery, notes) VALUES (?,?,?,?,?,'pendiente',datetime('now'),?,?)",
+            "status, order_date, expected_delivery, notes) "
+            "VALUES (?,?,?,?,?,'pendiente',to_char(now(),'YYYY-MM-DD HH24:MI:SS'),?,?) RETURNING id",
             (supplier_id, product_id, quantity, unit_cost, total_cost, expected_delivery, notes)
         )
+        new_order_id = cursor.fetchone()[0]
         conn.commit()
         return json.dumps({
             "success": True,
-            "order_id": cursor.lastrowid,
+            "order_id": new_order_id,
             "product_name": product[0],
             "quantity": quantity,
             "unit_cost": unit_cost,
@@ -78,11 +80,11 @@ def update_order_status(db_path: str, order_id: int, new_status: str) -> str:
 
         if new_status == "recibido":
             conn.execute(
-                "UPDATE purchase_orders SET status = ?, received_date = date('now') WHERE id = ?",
+                "UPDATE purchase_orders SET status = ?, received_date = to_char(now(),'YYYY-MM-DD') WHERE id = ?",
                 (new_status, order_id)
             )
             conn.execute(
-                "UPDATE inventory SET quantity = quantity + ?, last_updated = datetime('now') "
+                "UPDATE inventory SET quantity = quantity + ?, last_updated = to_char(now(),'YYYY-MM-DD HH24:MI:SS') "
                 "WHERE product_id = ?",
                 (order["quantity"], order["product_id"])
             )

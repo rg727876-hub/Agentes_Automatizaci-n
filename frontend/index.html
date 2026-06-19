@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RetailMind · Inventario Inteligente</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">🛒</div>
+        <div class="brand-text">
+          <span class="brand-name">RetailMind</span>
+          <span class="brand-sub">Inventario IA</span>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="dashboard">
+          <span class="nav-ico">📊</span> Dashboard
+        </button>
+        <button class="nav-item" data-view="chat">
+          <span class="nav-ico">💬</span> Asistente IA
+        </button>
+        <button class="nav-item" data-view="alerts">
+          <span class="nav-ico">🔔</span> Alertas
+          <span class="nav-badge" id="navAlertsBadge" hidden>0</span>
+        </button>
+        <button class="nav-item" data-view="products">
+          <span class="nav-ico">📦</span> Productos
+        </button>
+        <button class="nav-item" data-view="suppliers">
+          <span class="nav-ico">🚚</span> Proveedores
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="agent-list-title">6 Agentes activos</div>
+        <ul class="agent-list">
+          <li><span class="dot"></span> Inventario</li>
+          <li><span class="dot"></span> Ventas</li>
+          <li><span class="dot"></span> Demanda</li>
+          <li><span class="dot"></span> Proveedores</li>
+          <li><span class="dot"></span> Compras</li>
+          <li><span class="dot"></span> Reportes</li>
+        </ul>
+        <div class="status" id="systemStatus"><span class="status-dot"></span> Conectando…</div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="viewTitle">Dashboard</h1>
+          <p id="viewSubtitle" class="muted">Visión general del negocio en tiempo real</p>
+        </div>
+        <button class="btn-refresh" id="refreshBtn" title="Actualizar datos">⟳ Actualizar</button>
+      </header>
+
+      <!-- ===== Vista: Dashboard ===== -->
+      <section class="view" id="view-dashboard">
+        <div class="kpi-grid" id="kpiGrid">
+          <div class="kpi-skeleton"></div><div class="kpi-skeleton"></div>
+          <div class="kpi-skeleton"></div><div class="kpi-skeleton"></div>
+        </div>
+
+        <div class="chart-grid">
+          <div class="card chart-card span-2">
+            <div class="card-head"><h3>Ingresos diarios (30 días)</h3></div>
+            <div class="chart-wrap"><canvas id="chartSales"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><h3>Ventas por categoría</h3></div>
+            <div class="chart-wrap"><canvas id="chartCategory"></canvas></div>
+          </div>
+          <div class="card chart-card">
+            <div class="card-head"><h3>Valor de inventario</h3></div>
+            <div class="chart-wrap"><canvas id="chartInventory"></canvas></div>
+          </div>
+          <div class="card chart-card span-2">
+            <div class="card-head"><h3>Productos más vendidos</h3></div>
+            <div class="chart-wrap"><canvas id="chartTop"></canvas></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Vista: Chat ===== -->
+      <section class="view" id="view-chat" hidden>
+        <div class="card chat-card">
+          <div class="chat-messages" id="chatMessages">
+            <div class="msg msg-bot">
+              <div class="msg-avatar">🤖</div>
+              <div class="msg-bubble">
+                ¡Hola! Soy tu asistente de inventario. Pregúntame lo que quieras sobre stock,
+                ventas, proveedores, demanda o pídeme un reporte ejecutivo.
+              </div>
+            </div>
+          </div>
+          <div class="suggestions" id="suggestions">
+            <button class="chip">¿Qué productos están sin stock?</button>
+            <button class="chip">Ventas de los últimos 30 días</button>
+            <button class="chip">¿Qué productos están en riesgo de desabasto?</button>
+            <button class="chip">Genera un reporte ejecutivo completo</button>
+          </div>
+          <form class="chat-input" id="chatForm">
+            <input id="chatInput" type="text" autocomplete="off"
+                   placeholder="Escribe tu consulta en lenguaje natural…" />
+            <button type="submit" id="chatSend">Enviar</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- ===== Vista: Alertas ===== -->
+      <section class="view" id="view-alerts" hidden>
+        <div class="card">
+          <div class="card-head"><h3>🔴 Sin stock</h3></div>
+          <div id="outOfStockList" class="list"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>🟠 Stock bajo</h3></div>
+          <div id="lowStockList" class="list"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>🔔 Alertas activas</h3></div>
+          <div id="alertsList" class="list"></div>
+        </div>
+      </section>
+
+      <!-- ===== Vista: Productos ===== -->
+      <section class="view" id="view-products" hidden>
+        <div class="card">
+          <div class="card-head">
+            <h3>Catálogo de productos</h3>
+            <input id="productSearch" class="search-box" placeholder="🔎 Buscar producto…" />
+          </div>
+          <div class="table-wrap">
+            <table class="table" id="productsTable">
+              <thead>
+                <tr><th>SKU</th><th>Producto</th><th>Categoría</th><th>Precio</th><th>Stock</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Vista: Proveedores ===== -->
+      <section class="view" id="view-suppliers" hidden>
+        <div class="card">
+          <div class="card-head"><h3>Proveedores</h3></div>
+          <div class="table-wrap">
+            <table class="table" id="suppliersTable">
+              <thead>
+                <tr><th>Nombre</th><th>Contacto</th><th>País</th><th>Lead time</th><th>Confiabilidad</th><th>Productos</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
