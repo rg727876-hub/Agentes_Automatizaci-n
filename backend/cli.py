@@ -7,10 +7,11 @@ from google import genai
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
 
-from config import GEMINI_API_KEY, DB_PATH, DATABASE_URL, VECTOR_STORE_DIR
+from config import GEMINI_API_KEY, DB_PATH, DATABASE_URL, VECTOR_STORE_DIR, ALERT_EMAIL_TO, ALERT_CHECK_INTERVAL
 from database import setup_database, get_connection
 from agents import OrchestratorAgent
 from memory import VectorMemory
+from tools.alert_monitor import start_background_monitor
 
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
@@ -131,7 +132,11 @@ def main():
     print("Conectando con Gemini...", end=" ", flush=True)
     client = genai.Client(api_key=GEMINI_API_KEY)
     orchestrator = OrchestratorAgent(client, DB_PATH, memory=memory)
-    print("OK\n")
+    print("OK")
+
+    print("Iniciando monitor de alertas...", end=" ", flush=True)
+    start_background_monitor(DB_PATH)
+    print(f"OK (cada {ALERT_CHECK_INTERVAL} min → {ALERT_EMAIL_TO})\n")
 
     while True:
         try:

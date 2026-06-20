@@ -33,3 +33,7 @@ EMAIL_SENDER = os.environ.get("EMAIL_SENDER", "")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD", "")
 EMAIL_SMTP_SERVER = os.environ.get("EMAIL_SMTP_SERVER", "smtp.gmail.com")
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "587"))
+
+# Monitor automático de alertas de inventario
+ALERT_EMAIL_TO = os.environ.get("ALERT_EMAIL_TO", EMAIL_SENDER)  # destinatario de alertas
+ALERT_CHECK_INTERVAL = int(os.environ.get("ALERT_CHECK_INTERVAL", "60"))  # minutos

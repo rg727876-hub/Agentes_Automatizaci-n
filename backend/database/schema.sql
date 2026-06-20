@@ -76,5 +76,9 @@ CREATE TABLE IF NOT EXISTS inventory_alerts (
     alert_type TEXT NOT NULL,
     message TEXT NOT NULL,
     is_resolved INTEGER DEFAULT 0,
+    notified BOOLEAN DEFAULT FALSE,
     created_at TEXT DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
 );
+
+-- Migración: agrega la columna si la tabla ya existía sin ella
+ALTER TABLE inventory_alerts ADD COLUMN IF NOT EXISTS notified BOOLEAN DEFAULT FALSE;
