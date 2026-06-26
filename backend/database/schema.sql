@@ -82,3 +82,33 @@ CREATE TABLE IF NOT EXISTS inventory_alerts (
 
 -- Migración: agrega la columna si la tabla ya existía sin ella
 ALTER TABLE inventory_alerts ADD COLUMN IF NOT EXISTS notified BOOLEAN DEFAULT FALSE;
+
+-- ============================================================================
+-- Memoria vectorial (pgvector)
+-- Reemplaza a ChromaDB local: los embeddings viven en esta misma base, de modo
+-- que la memoria es persistente y compartida entre instancias (necesario para
+-- desplegar en AWS App Runner, donde el contenedor es efímero).
+-- Embeddings de Gemini text-embedding-004 -> 768 dimensiones.
+-- ============================================================================
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS memory_conversations (
+    id TEXT PRIMARY KEY,
+    query TEXT NOT NULL,
+    response TEXT NOT NULL,
+    document TEXT NOT NULL,
+    agents_used TEXT DEFAULT '[]',
+    response_length INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    embedding vector(768)
+);
+
+CREATE TABLE IF NOT EXISTS memory_product_index (
+    id TEXT PRIMARY KEY,
+    document TEXT NOT NULL,
+    sku TEXT,
+    category TEXT,
+    unit_price TEXT,
+    quantity TEXT,
+    embedding vector(768)
+);

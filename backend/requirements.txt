@@ -1,7 +1,8 @@
 google-genai>=1.0.0
 python-dotenv>=1.0.0
-chromadb>=0.5.0
 psycopg2-binary>=2.9.0
 certifi>=2024.0.0
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
+# Memoria vectorial: pgvector se usa vía SQL crudo (no requiere paquete extra).
+# La extensión `vector` debe estar habilitada en Supabase (schema.sql la crea).

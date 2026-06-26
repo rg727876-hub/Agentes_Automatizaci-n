@@ -1,0 +1,26 @@
+# ============================================================================
+#  AWS App Runner — despliegue desde CÓDIGO FUENTE (alternativa al Dockerfile).
+#
+#  Úsalo solo si creas el servicio App Runner apuntando a este repositorio en
+#  vez de a una imagen de ECR. Para producción reproducible, preferir el
+#  Dockerfile (ver ARCHITECTURE.md §7).
+#
+#  IMPORTANTE: los secretos (GEMINI_API_KEY, DATABASE_URL, EMAIL_*) NO van aquí.
+#  Configúralos en la consola de App Runner como environment variables o,
+#  mejor, como referencias a AWS Secrets Manager.
+# ============================================================================
+version: 1.0
+runtime: python3
+build:
+  commands:
+    build:
+      - pip install --upgrade pip
+      - pip install -r backend/requirements.txt
+run:
+  runtime-version: 3.12
+  command: sh -c "cd backend && uvicorn app:app --host 0.0.0.0 --port 8000"
+  network:
+    port: 8000
+  env:
+    - name: PORT
+      value: "8000"
