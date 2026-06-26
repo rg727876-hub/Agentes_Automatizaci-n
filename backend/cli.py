@@ -7,7 +7,7 @@ from google import genai
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8", errors="replace")
 
-from config import GEMINI_API_KEY, DB_PATH, DATABASE_URL, VECTOR_STORE_DIR, ALERT_EMAIL_TO, ALERT_CHECK_INTERVAL
+from config import GEMINI_API_KEY, DB_PATH, DATABASE_URL, ALERT_EMAIL_TO, ALERT_CHECK_INTERVAL
 from database import setup_database, get_connection
 from agents import OrchestratorAgent
 from memory import VectorMemory
@@ -16,7 +16,7 @@ from tools.alert_monitor import start_background_monitor
 BANNER = """
 ╔══════════════════════════════════════════════════════════════════╗
 ║     SISTEMA MULTIAGENTE DE INVENTARIO RETAIL                    ║
-║     Powered by Google Gemini + ChromaDB                         ║
+║     Powered by Google Gemini + pgvector (Supabase)             ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Agentes activos:                                               ║
 ║    • Inventario   • Ventas      • Demanda                       ║
@@ -122,17 +122,18 @@ def main():
     setup_database(DB_PATH)
     print("OK")
 
-    print("Inicializando memoria vectorial ChromaDB...", end=" ", flush=True)
-    memory = VectorMemory(persist_dir=VECTOR_STORE_DIR)
+    print("Conectando con Gemini...", end=" ", flush=True)
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    print("OK")
+
+    print("Inicializando memoria vectorial (pgvector)...", end=" ", flush=True)
+    memory = VectorMemory(client)
     products = _load_products_for_index(DB_PATH)
     memory.index_products(products)
     stats = memory.get_stats()
     print(f"OK ({stats['total_conversations']} conversaciones | {stats['total_products_indexed']} productos)")
 
-    print("Conectando con Gemini...", end=" ", flush=True)
-    client = genai.Client(api_key=GEMINI_API_KEY)
     orchestrator = OrchestratorAgent(client, DB_PATH, memory=memory)
-    print("OK")
 
     print("Iniciando monitor de alertas...", end=" ", flush=True)
     start_background_monitor(DB_PATH)

@@ -1,6 +1,6 @@
 # 🛒 Sistema Multiagente de Inventario Retail
 
-Sistema de gestión de inventario retail basado en **múltiples agentes de IA**, con interfaz en lenguaje natural en español. Utiliza **Google Gemini** como LLM, **ChromaDB** para memoria semántica y **Supabase (PostgreSQL)** como base de datos.
+Sistema de gestión de inventario retail basado en **múltiples agentes de IA**, con interfaz en lenguaje natural en español. Utiliza **Google Gemini** como LLM, **pgvector** (sobre Supabase/PostgreSQL) para memoria semántica y **Supabase (PostgreSQL)** como base de datos. Diseñado para desplegarse en **AWS App Runner** (ver [ARCHITECTURE.md](ARCHITECTURE.md)).
 
 ---
 
@@ -8,7 +8,7 @@ Sistema de gestión de inventario retail basado en **múltiples agentes de IA**,
 
 - 🤖 **6 agentes especializados** coordinados por un orquestador central
 - 💬 **Interfaz conversacional** en lenguaje natural (español)
-- 🧠 **Memoria vectorial persistente** entre sesiones (ChromaDB)
+- 🧠 **Memoria vectorial persistente** entre sesiones (pgvector en Supabase)
 - 📧 **Envío de reportes por email** (Gmail / SMTP)
 - 📊 **Base de datos Supabase (PostgreSQL)** con 25 productos, 5 proveedores y 90 días de historial
 - 🔄 **Historial de sesión** — el sistema recuerda el contexto de la conversación
@@ -32,15 +32,29 @@ Sistema de gestión de inventario retail basado en **múltiples agentes de IA**,
 
 ## 🗂️ Estructura del proyecto
 
-El proyecto está dividido en dos carpetas: **`backend/`** (la API y toda la
-lógica de agentes) y **`frontend/`** (la interfaz web). Un solo servidor sirve
-ambas cosas.
+El proyecto está dividido en **`backend/`** (la API y toda la lógica de agentes)
+y **`frontend/`** (la interfaz web). Un solo servidor sirve ambas cosas. La
+arquitectura por capas y las convenciones para crecer están detalladas en
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ```
 agente_automatizacion/
-├── backend/                   # API + lógica (Python / FastAPI)
-│   ├── app.py                 # Servidor web: API REST + sirve el frontend
+├── ARCHITECTURE.md            # Arquitectura por capas + despliegue en AWS
+├── Dockerfile                 # Imagen para AWS App Runner
+├── .dockerignore
+├── apprunner.yaml             # Config de App Runner (modo código fuente)
+├── backend/                   # API + lógica (Python / FastAPI) — raíz de import
+│   ├── app.py                 # Punto de entrada: arma FastAPI y monta todo
 │   ├── cli.py                 # Versión de terminal (la app original)
+│   ├── api/                   # Capa de presentación (routers REST)
+│   │   ├── __init__.py        # api_router: agrupa los routers bajo /api
+│   │   ├── state.py           # Estado compartido + lifespan (init del sistema)
+│   │   ├── utils.py           # Helpers tolerantes a fallos
+│   │   ├── chat.py            # POST /api/chat
+│   │   ├── dashboard.py       # GET  /api/dashboard
+│   │   ├── catalog.py         # GET  /api/products, /api/suppliers
+│   │   ├── memory.py          # GET  /api/history, /api/search, /api/memory/stats
+│   │   └── health.py          # GET  /api/health
 │   ├── agents/
 │   │   ├── base.py            # Clase base con loop de herramientas Gemini
 │   │   ├── orchestrator.py    # Orquestador central
@@ -50,8 +64,8 @@ agente_automatizacion/
 │   │   ├── suppliers.py       # Agente de proveedores
 │   │   ├── purchasing.py      # Agente de compras
 │   │   └── reports.py         # Agente de reportes (+ email)
-│   ├── tools/                 # Herramientas de datos de cada agente
-│   ├── memory/                # Memoria semántica con ChromaDB
+│   ├── tools/                 # Lógica de negocio / acceso a datos
+│   ├── memory/                # Memoria semántica con pgvector
 │   ├── database/              # Paquete de BD (Supabase / PostgreSQL)
 │   ├── scripts/               # smoke_test_db.py
 │   ├── config.py              # Configuración y variables de entorno
@@ -230,12 +244,38 @@ python backend/scripts/smoke_test_db.py
 
 ---
 
+## ☁️ Despliegue en AWS (App Runner)
+
+La app se empaqueta como un contenedor y se despliega en **AWS App Runner**. El
+detalle completo (topología, escalado, secretos) está en
+[ARCHITECTURE.md](ARCHITECTURE.md). Resumen:
+
+```bash
+# 1. Construir la imagen
+docker build -t inventario-retail .
+
+# 2. Subirla a ECR (ajusta REGION y ACCOUNT_ID)
+aws ecr create-repository --repository-name inventario-retail
+aws ecr get-login-password --region $REGION \
+  | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+docker tag inventario-retail:latest $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/inventario-retail:latest
+docker push $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/inventario-retail:latest
+
+# 3. Crear el servicio App Runner desde esa imagen:
+#    - Puerto: 8000   - Health check: /api/health
+#    - Variables de entorno: GEMINI_API_KEY, DATABASE_URL, EMAIL_*, etc.
+```
+
+> Para probar la imagen en local: `docker build -t inventario-retail . && docker run -p 8000:8000 --env-file .env inventario-retail`
+
+---
+
 ## 🛠️ Tecnologías
 
 | Tecnología | Uso |
 |---|---|
-| [Google Gemini](https://ai.google.dev/) | LLM principal (function calling) |
-| [ChromaDB](https://www.trychroma.com/) | Memoria vectorial semántica |
+| [Google Gemini](https://ai.google.dev/) | LLM principal (function calling) + embeddings |
+| [pgvector](https://github.com/pgvector/pgvector) | Memoria vectorial semántica (sobre Supabase) |
 | [Supabase](https://supabase.com/) (PostgreSQL) | Base de datos de inventario |
 | psycopg2 | Driver de PostgreSQL |
 | smtplib | Envío de reportes por email |

@@ -1,0 +1,33 @@
+# No meter basura ni secretos en la imagen
+.git/
+.github/
+.claude/
+
+# Secretos
+.env
+
+# Entornos virtuales locales
+.venv/
+venv/
+env/
+
+# Cachés de Python
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Memoria vectorial antigua de ChromaDB (ya no se usa; ahora es pgvector)
+vector_store/
+
+# IDE / SO
+.vscode/
+.idea/
+*.code-workspace
+
+# Documentación y scripts que no necesita el runtime
+ARCHITECTURE.md
+README.md
+run.ps1
+run.bat

@@ -8,9 +8,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Carga el .env desde la raíz del proyecto sin importar desde dónde se ejecute.
 load_dotenv(PROJECT_ROOT / ".env")
 
-# Carpeta persistente para la memoria vectorial (ChromaDB), siempre en la raíz.
-VECTOR_STORE_DIR = str(PROJECT_ROOT / "vector_store")
-
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # Connection string de Supabase / PostgreSQL.
@@ -25,6 +22,11 @@ DB_PATH = "supabase"
 ORCHESTRATOR_MODEL = "gemini-3.1-flash-lite"
 AGENT_MODEL = "gemini-3.1-flash-lite"
 
+# Memoria vectorial (pgvector). Modelo de embeddings de Gemini y su dimensión.
+# text-embedding-004 -> 768 dimensiones (debe coincidir con vector(768) en schema.sql).
+EMBED_MODEL = "text-embedding-004"
+EMBED_DIM = 768
+
 MAX_ITERATIONS = 10
 MAX_RETRIES = 2
 
@@ -37,3 +39,8 @@ EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "587"))
 # Monitor automático de alertas de inventario
 ALERT_EMAIL_TO = os.environ.get("ALERT_EMAIL_TO", EMAIL_SENDER)  # destinatario de alertas
 ALERT_CHECK_INTERVAL = int(os.environ.get("ALERT_CHECK_INTERVAL", "60"))  # minutos
+
+# ¿Arrancar el monitor de alertas dentro del servidor web?
+# Apagado por defecto: con varias instancias en App Runner enviaría emails
+# duplicados. En producción conviene un job externo (ver ARCHITECTURE.md §8).
+ENABLE_ALERT_MONITOR = os.environ.get("ENABLE_ALERT_MONITOR", "false").lower() in ("1", "true", "yes")
