@@ -49,7 +49,10 @@ def init_system() -> None:
     memory = VectorMemory(client)
     memory.index_products(_load_products_for_index())
 
-    orchestrator = OrchestratorAgent(client, DB_PATH, memory=memory)
+    # El orquestador ya no necesita el cliente genai: crea su propio LLM vía la
+    # capa LangChain (llm.get_llm). El cliente genai se mantiene solo para los
+    # embeddings de la memoria vectorial.
+    orchestrator = OrchestratorAgent(memory=memory)
 
     _state["client"] = client
     _state["memory"] = memory

@@ -1,11 +1,13 @@
-from .base import BaseAgent
+"""Agente de Proveedores (LangGraph ReAct)."""
+from .base import build_agent, run_agent
+from .tool_adapter import make_tools
 from tools.supplier_tools import SUPPLIER_TOOLS, execute_supplier_tool
-from tools.inventory_tools import execute_inventory_tool
-from tools.inventory_tools import INVENTORY_TOOLS
+from tools.inventory_tools import INVENTORY_TOOLS, execute_inventory_tool
+from config import AGENT_MODEL
 
 _PRODUCT_TOOLS = [t for t in INVENTORY_TOOLS if t["name"] == "get_all_products"]
 
-SYSTEM_PROMPT = """Eres el Agente de Proveedores del sistema multiagente de gestión de retail.
+INSTRUCTIONS = """Eres el Agente de Proveedores del sistema multiagente de gestión de retail.
 Tu especialidad es gestionar las relaciones con proveedores y optimizar las fuentes de abastecimiento.
 
 IDIOMA OBLIGATORIO: Responde SIEMPRE en español. Jamás uses inglés.
@@ -30,17 +32,13 @@ Cuando presentes resultados, incluye: nombre del proveedor, costo unitario, lead
 puntuación de confiabilidad. Formatea los montos en pesos chilenos (CLP)."""
 
 
-ALL_TOOLS = SUPPLIER_TOOLS + _PRODUCT_TOOLS
-
-
-class SupplierAgent(BaseAgent):
-    def __init__(self, client, db_path: str, model: str):
-        super().__init__(client, db_path, model)
+class SupplierAgent:
+    def __init__(self, model: str = AGENT_MODEL):
+        tools = (
+            make_tools(SUPPLIER_TOOLS, execute_supplier_tool)
+            + make_tools(_PRODUCT_TOOLS, execute_inventory_tool)
+        )
+        self._agent = build_agent(INSTRUCTIONS, tools, model)
 
     def run(self, query: str) -> str:
-        return self.execute(query, ALL_TOOLS, SYSTEM_PROMPT)
-
-    def _execute_tool(self, tool_name: str, tool_input: dict) -> str:
-        if tool_name == "get_all_products":
-            return execute_inventory_tool(tool_name, tool_input, self.db_path)
-        return execute_supplier_tool(tool_name, tool_input, self.db_path)
+        return run_agent(self._agent, query)

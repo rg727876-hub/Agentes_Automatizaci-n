@@ -1,7 +1,10 @@
-from .base import BaseAgent
+"""Agente de Ventas (LangGraph ReAct)."""
+from .base import build_agent, run_agent
+from .tool_adapter import make_tools
 from tools.sales_tools import SALES_TOOLS, execute_sales_tool
+from config import AGENT_MODEL
 
-SYSTEM_PROMPT = """Eres el Agente de Ventas del sistema multiagente de gestión de retail.
+INSTRUCTIONS = """Eres el Agente de Ventas del sistema multiagente de gestión de retail.
 Tu especialidad es analizar el desempeño de ventas y tendencias comerciales.
 
 Responsabilidades:
@@ -15,12 +18,10 @@ Siempre responde en español con análisis detallados y comparaciones temporales
 Incluye montos en pesos chilenos (CLP) formateados apropiadamente."""
 
 
-class SalesAgent(BaseAgent):
-    def __init__(self, client, db_path: str, model: str):
-        super().__init__(client, db_path, model)
+class SalesAgent:
+    def __init__(self, model: str = AGENT_MODEL):
+        tools = make_tools(SALES_TOOLS, execute_sales_tool)
+        self._agent = build_agent(INSTRUCTIONS, tools, model)
 
     def run(self, query: str) -> str:
-        return self.execute(query, SALES_TOOLS, SYSTEM_PROMPT)
-
-    def _execute_tool(self, tool_name: str, tool_input: dict) -> str:
-        return execute_sales_tool(tool_name, tool_input, self.db_path)
+        return run_agent(self._agent, query)

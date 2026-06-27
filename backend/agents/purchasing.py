@@ -1,9 +1,18 @@
-from .base import BaseAgent
+"""Agente de Compras (LangGraph ReAct)."""
+from .base import build_agent, run_agent
+from .tool_adapter import make_tools
 from tools.order_tools import ORDER_TOOLS, execute_order_tool
 from tools.supplier_tools import SUPPLIER_TOOLS, execute_supplier_tool
 from tools.inventory_tools import INVENTORY_TOOLS, execute_inventory_tool
+from config import AGENT_MODEL
 
-SYSTEM_PROMPT = """Eres el Agente de Compras del sistema multiagente de gestión de retail.
+_SUPPLIER_SUBSET = [t for t in SUPPLIER_TOOLS if t["name"] in ("get_best_supplier_for_product", "get_all_suppliers")]
+_INVENTORY_SUBSET = [t for t in INVENTORY_TOOLS if t["name"] in (
+    "get_all_products", "get_product_inventory",
+    "get_out_of_stock_products", "get_low_stock_products",
+)]
+
+INSTRUCTIONS = """Eres el Agente de Compras del sistema multiagente de gestión de retail.
 Tu especialidad es gestionar el proceso de reabastecimiento y órdenes de compra.
 
 REGLA CRÍTICA: NUNCA pidas el ID de un producto al usuario. Siempre usa get_all_products para
@@ -19,31 +28,15 @@ Flujo obligatorio para crear una orden:
 Siempre responde en español con detalles específicos de cada orden.
 Confirma siempre: proveedor, producto, cantidad, costo unitario y fecha esperada de entrega."""
 
-ALL_TOOLS = ORDER_TOOLS + \
-            [t for t in SUPPLIER_TOOLS if t["name"] in ("get_best_supplier_for_product", "get_all_suppliers")] + \
-            [t for t in INVENTORY_TOOLS if t["name"] in (
-                "get_all_products", "get_product_inventory",
-                "get_out_of_stock_products", "get_low_stock_products"
-            )]
 
-
-class PurchasingAgent(BaseAgent):
-    def __init__(self, client, db_path: str, model: str):
-        super().__init__(client, db_path, model)
+class PurchasingAgent:
+    def __init__(self, model: str = AGENT_MODEL):
+        tools = (
+            make_tools(ORDER_TOOLS, execute_order_tool)
+            + make_tools(_SUPPLIER_SUBSET, execute_supplier_tool)
+            + make_tools(_INVENTORY_SUBSET, execute_inventory_tool)
+        )
+        self._agent = build_agent(INSTRUCTIONS, tools, model)
 
     def run(self, query: str) -> str:
-        return self.execute(query, ALL_TOOLS, SYSTEM_PROMPT)
-
-    def _execute_tool(self, tool_name: str, tool_input: dict) -> str:
-        order_tool_names = {t["name"] for t in ORDER_TOOLS}
-        supplier_tool_names = {"get_best_supplier_for_product", "get_all_suppliers"}
-        inventory_tool_names = {"get_all_products", "get_product_inventory", "get_out_of_stock_products", "get_low_stock_products"}
-
-        if tool_name in order_tool_names:
-            return execute_order_tool(tool_name, tool_input, self.db_path)
-        elif tool_name in supplier_tool_names:
-            return execute_supplier_tool(tool_name, tool_input, self.db_path)
-        elif tool_name in inventory_tool_names:
-            return execute_inventory_tool(tool_name, tool_input, self.db_path)
-        import json
-        return json.dumps({"error": f"Herramienta desconocida: {tool_name}"})
+        return run_agent(self._agent, query)

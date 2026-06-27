@@ -1,20 +1,43 @@
-import json
-from google.genai import types
-from config import ORCHESTRATOR_MODEL, AGENT_MODEL, MAX_ITERATIONS
-from agents.base import convert_tools, _gemini_call
+"""Orquestador central como supervisor de LangGraph.
+
+Antes: un bucle manual de *function calling* que despachaba a los agentes a mano.
+Ahora: un agente ReAct (`create_react_agent`) cuyas **herramientas son los 6
+agentes especializados**. El orquestador razona y decide a quién delegar; cada
+"herramienta de delegación" ejecuta el grafo del especialista correspondiente.
+
+Qué aporta esta versión:
+- **Prompt no estático**: se arma en cada turno con la fecha y el contexto de
+  memoria de largo plazo (pgvector) relevante a la consulta.
+- **Memoria de sesión**: un `MemorySaver` (checkpointer de LangGraph) mantiene el
+  hilo de la conversación entre turnos.
+- **Memoria de largo plazo**: se inyecta contexto de conversaciones previas y se
+  guarda cada interacción (igual que antes, vía `VectorMemory`).
+- **Reflejo**: mensajes triviales se responden sin LLM (control de costo).
+- **Observabilidad**: al usar la capa `llm.get_llm`, todo queda trazado en
+  LangSmith (tokens/costo/latencia) si hay API key.
+"""
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.tools import StructuredTool
+from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
+from pydantic import BaseModel, Field
+
+from config import ORCHESTRATOR_MODEL
+from llm import get_llm
 from .inventory import InventoryAgent
 from .sales import SalesAgent
 from .demand import DemandForecastAgent
 from .suppliers import SupplierAgent
 from .purchasing import PurchasingAgent
 from .reports import ReportAgent
+from .reflex import reflex_response
 
-SYSTEM_PROMPT = """Eres el Orquestador Central del sistema multiagente de gestión de inventario retail.
+INSTRUCTIONS = """Eres el Orquestador Central del sistema multiagente de gestión de inventario retail.
 Coordinas un equipo de 6 agentes especializados para responder cualquier consulta sobre el negocio.
 
 IDIOMA OBLIGATORIO: Responde SIEMPRE en español. Jamás uses inglés aunque el usuario escriba en otro idioma.
 
-AGENTES DISPONIBLES:
+AGENTES DISPONIBLES (cada uno es una herramienta de delegación):
 1. invoke_inventory_agent    - Stock actual, alertas, valor del inventario, productos sin stock
 2. invoke_sales_agent        - Análisis de ventas, ingresos, productos top, tendencias de ventas
 3. invoke_demand_agent       - Pronósticos de demanda, días de stock restantes, riesgo de desabasto
@@ -24,12 +47,12 @@ AGENTES DISPONIBLES:
                                (también puede enviar el reporte por correo electrónico)
 
 PROTOCOLO DE DECISIÓN:
-- Para consultas simples de stock o alertas → usa inventory_agent
-- Para análisis de ventas o ingresos → usa sales_agent
-- Para proyecciones futuras o riesgos → usa demand_agent
-- Para evaluación de proveedores → usa supplier_agent
-- Para crear órdenes o gestionar compras → usa purchasing_agent
-- Para reportes completos o análisis ejecutivos → usa report_agent
+- Para consultas simples de stock o alertas → usa invoke_inventory_agent
+- Para análisis de ventas o ingresos → usa invoke_sales_agent
+- Para proyecciones futuras o riesgos → usa invoke_demand_agent
+- Para evaluación de proveedores → usa invoke_supplier_agent
+- Para crear órdenes o gestionar compras → usa invoke_purchasing_agent
+- Para reportes completos o análisis ejecutivos → usa invoke_report_agent
 - Para consultas complejas → combina múltiples agentes secuencialmente
 
 REGLAS DE COMPORTAMIENTO PROACTIVO (MUY IMPORTANTE):
@@ -37,163 +60,114 @@ REGLAS DE COMPORTAMIENTO PROACTIVO (MUY IMPORTANTE):
 - Si el usuario menciona una categoría informal ("artefactos", "gadgets", "tecnología", "aparatos") mapéala a la categoría del sistema más cercana: Electrónica, Ropa, Alimentos, Hogar o Deportes.
 - Si el usuario menciona una moneda extranjera (soles, dólares, euros), indica que los precios están en pesos chilenos (CLP) y proporciona la información de igual forma.
 - Ante consultas ambiguas, toma la interpretación más útil y actúa. Puedes mencionar tu interpretación al inicio de la respuesta, pero siempre responde con datos concretos.
-- Usa el historial de la conversación para mantener el contexto: si el usuario ya indicó un presupuesto o categoría, recuérdalo sin volver a preguntarlo."""
+- Usa el historial de la conversación para mantener el contexto: si el usuario ya indicó un presupuesto o categoría, recuérdalo sin volver a preguntarlo.
+- Después de delegar, SINTETIZA la información de los agentes en una respuesta final clara para el usuario."""
 
-_ORCHESTRATOR_TOOL_DEFS = [
-    {
-        "name": "invoke_inventory_agent",
-        "description": "Invoca al Agente de Inventario para consultas sobre stock actual, alertas de inventario, valor del inventario y disponibilidad de productos.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "Consulta para el agente de inventario"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "invoke_sales_agent",
-        "description": "Invoca al Agente de Ventas para análisis de ventas, ingresos, productos más vendidos y tendencias comerciales.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "Consulta para el agente de ventas"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "invoke_demand_agent",
-        "description": "Invoca al Agente de Pronóstico de Demanda para proyecciones futuras, días de stock restante y riesgos de desabastecimiento.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "Consulta para el agente de demanda"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "invoke_supplier_agent",
-        "description": "Invoca al Agente de Proveedores para información de proveedores, evaluación comparativa y recomendaciones de abastecimiento.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "Consulta para el agente de proveedores"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "invoke_purchasing_agent",
-        "description": "Invoca al Agente de Compras para crear órdenes de compra, gestionar reabastecimiento y hacer seguimiento de pedidos.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "Consulta para el agente de compras"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "invoke_report_agent",
-        "description": "Invoca al Agente de Reportes para generar informes ejecutivos completos, dashboards y análisis de KPIs. También puede enviar el reporte por correo electrónico si el usuario lo solicita.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"query": {"type": "string", "description": "Consulta para el agente de reportes"}},
-            "required": ["query"],
-        },
-    },
+# Definición de las herramientas de delegación: (nombre, clave de agente, descripción).
+_HANDOFFS = [
+    ("invoke_inventory_agent", "inventory",
+     "Delega en el Agente de Inventario: stock actual, alertas, valor del inventario y disponibilidad de productos."),
+    ("invoke_sales_agent", "sales",
+     "Delega en el Agente de Ventas: análisis de ventas, ingresos, productos más vendidos y tendencias."),
+    ("invoke_demand_agent", "demand",
+     "Delega en el Agente de Demanda: pronósticos, días de stock restante y riesgo de desabastecimiento."),
+    ("invoke_supplier_agent", "supplier",
+     "Delega en el Agente de Proveedores: información, evaluación comparativa y recomendaciones de abastecimiento."),
+    ("invoke_purchasing_agent", "purchasing",
+     "Delega en el Agente de Compras: crear órdenes, reabastecimiento y seguimiento de pedidos."),
+    ("invoke_report_agent", "report",
+     "Delega en el Agente de Reportes: informes ejecutivos, KPIs y análisis integral (puede enviarlo por email)."),
 ]
 
 
+class _DelegationArgs(BaseModel):
+    query: str = Field(description="Consulta en lenguaje natural para el agente especializado.")
+
+
 class OrchestratorAgent:
-    def __init__(self, client, db_path: str, memory=None):
-        self.client = client
-        self.db_path = db_path
-        self.model = ORCHESTRATOR_MODEL
+    def __init__(self, memory=None):
         self.memory = memory
-        self._gemini_tools = convert_tools(_ORCHESTRATOR_TOOL_DEFS)
-        self._session_history = []  # lista de (user_query, assistant_response)
-        self._agents = {
-            "invoke_inventory_agent": InventoryAgent(client, db_path, AGENT_MODEL),
-            "invoke_sales_agent": SalesAgent(client, db_path, AGENT_MODEL),
-            "invoke_demand_agent": DemandForecastAgent(client, db_path, AGENT_MODEL),
-            "invoke_supplier_agent": SupplierAgent(client, db_path, AGENT_MODEL),
-            "invoke_purchasing_agent": PurchasingAgent(client, db_path, AGENT_MODEL),
-            "invoke_report_agent": ReportAgent(client, db_path, AGENT_MODEL),
+        self._current_context = ""  # memoria de largo plazo relevante al turno actual
+        self._specialists = {
+            "inventory": InventoryAgent(),
+            "sales": SalesAgent(),
+            "demand": DemandForecastAgent(),
+            "supplier": SupplierAgent(),
+            "purchasing": PurchasingAgent(),
+            "report": ReportAgent(),
         }
+        self._checkpointer = MemorySaver()
+        self._agent = create_react_agent(
+            model=get_llm(ORCHESTRATOR_MODEL),
+            tools=self._build_handoff_tools(),
+            prompt=self._make_prompt,
+            checkpointer=self._checkpointer,
+        )
+        # Hilo único: el chat se serializa con chat_lock (ver api/state.py).
+        self._config = {"configurable": {"thread_id": "default"}}
+
+    def _build_handoff_tools(self) -> list:
+        tools = []
+        for tool_name, key, desc in _HANDOFFS:
+            def _make(agent_key):
+                def _delegate(query: str) -> str:
+                    return self._specialists[agent_key].run(query)
+                return _delegate
+
+            tools.append(StructuredTool.from_function(
+                func=_make(key),
+                name=tool_name,
+                description=desc,
+                args_schema=_DelegationArgs,
+            ))
+        return tools
+
+    def _make_prompt(self, state):
+        """Prompt dinámico: instrucciones + contexto de memoria del turno actual."""
+        from datetime import date
+        text = INSTRUCTIONS + f"\n\n[Contexto dinámico] Fecha actual: {date.today().isoformat()}."
+        if self._current_context:
+            text += (
+                "\n\nCONTEXTO DE CONVERSACIONES PREVIAS RELEVANTES "
+                "(úsalo para dar continuidad):\n" + self._current_context
+            )
+        return [SystemMessage(content=text)] + state["messages"]
 
     def execute(self, user_query: str) -> str:
-        system = SYSTEM_PROMPT
+        # 1) Reflejo: respuestas instantáneas sin gastar tokens.
+        quick = reflex_response(user_query)
+        if quick is not None:
+            return quick
+
+        # 2) Recupera memoria de largo plazo UNA vez por turno (no por paso del grafo).
+        self._current_context = ""
         if self.memory:
-            past_context = self.memory.get_relevant_context(user_query)
-            if past_context:
-                system += (
-                    "\n\nCONTEXTO DE CONVERSACIONES PREVIAS RELEVANTES "
-                    "(usa esto para dar continuidad):\n" + past_context
-                )
+            try:
+                self._current_context = self.memory.get_relevant_context(user_query) or ""
+            except Exception:  # noqa: BLE001
+                self._current_context = ""
 
-        # Construir historial con los últimos 6 intercambios de la sesión
-        contents = []
-        for past_user, past_assistant in self._session_history[-6:]:
-            contents.append(types.Content(role="user", parts=[types.Part(text=past_user)]))
-            contents.append(types.Content(role="model", parts=[types.Part(text=past_assistant)]))
-        contents.append(types.Content(role="user", parts=[types.Part(text=user_query)]))
-
-        final_response = ""
-        agents_used = []
-
-        for _ in range(MAX_ITERATIONS):
-            response = _gemini_call(
-                self.client.models.generate_content,
-                model=self.model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    tools=self._gemini_tools,
-                ),
-            )
-
-            if not response or not response.candidates:
-                final_response = "Lo siento, el servicio no está disponible en este momento. Por favor intenta de nuevo."
-                break
-
-            candidate = response.candidates[0]
-            if not candidate.content or not candidate.content.parts:
-                final_response = "Lo siento, recibí una respuesta vacía. Por favor intenta de nuevo."
-                break
-
-            parts = candidate.content.parts
-
-            func_calls = [
-                p.function_call for p in parts
-                if hasattr(p, "function_call") and p.function_call and p.function_call.name
-            ]
-
-            if not func_calls:
-                for p in parts:
-                    if hasattr(p, "text") and p.text:
-                        final_response = p.text
-                break
-
-            contents.append(candidate.content)
-
-            response_parts = []
-            for fc in func_calls:
-                agents_used.append(fc.name)
-                result = self._dispatch_agent(fc.name, dict(fc.args).get("query", ""))
-                response_parts.append(types.Part(
-                    function_response=types.FunctionResponse(
-                        name=fc.name,
-                        response={"result": result},
-                    )
-                ))
-
-            contents.append(types.Content(role="user", parts=response_parts))
-
-        if final_response:
-            self._session_history.append((user_query, final_response))
-            if self.memory:
-                self.memory.save_interaction(user_query, final_response, agents_used)
-
-        return final_response or "Error: Se alcanzó el límite máximo de iteraciones del orquestador."
-
-    def _dispatch_agent(self, tool_name: str, query: str) -> str:
-        agent = self._agents.get(tool_name)
-        if not agent:
-            return json.dumps({"error": f"Agente desconocido: {tool_name}"})
+        # 3) Ejecuta el grafo supervisor.
         try:
-            return agent.run(query)
-        except Exception as e:
-            return json.dumps({"error": f"Error en agente {tool_name}: {str(e)}"})
+            result = self._agent.invoke(
+                {"messages": [HumanMessage(content=user_query)]},
+                self._config,
+            )
+        except Exception as e:  # noqa: BLE001
+            return f"Lo siento, ocurrió un error al procesar tu consulta: {e}"
+
+        messages = result.get("messages", [])
+        response = messages[-1].content if messages else ""
+
+        # 4) Persiste la interacción en memoria de largo plazo (pgvector).
+        if response and self.memory:
+            agents_used = [
+                m.name for m in messages
+                if m.__class__.__name__ == "ToolMessage" and getattr(m, "name", None)
+            ]
+            try:
+                self.memory.save_interaction(user_query, response, agents_used)
+            except Exception:  # noqa: BLE001
+                pass
+
+        return response or "Error: no se obtuvo respuesta del orquestador."

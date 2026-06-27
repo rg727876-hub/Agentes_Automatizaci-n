@@ -1,7 +1,10 @@
-from .base import BaseAgent
+"""Agente de Inventario (LangGraph ReAct)."""
+from .base import build_agent, run_agent
+from .tool_adapter import make_tools
 from tools.inventory_tools import INVENTORY_TOOLS, execute_inventory_tool
+from config import AGENT_MODEL
 
-SYSTEM_PROMPT = """Eres el Agente de Inventario del sistema multiagente de gestión de retail.
+INSTRUCTIONS = """Eres el Agente de Inventario del sistema multiagente de gestión de retail.
 Tu especialidad es monitorear y analizar el estado del inventario de todos los productos.
 
 Responsabilidades:
@@ -15,12 +18,10 @@ Siempre responde en español con datos precisos y recomendaciones claras.
 Cuando hay alertas críticas (sin stock o stock crítico), resáltalas prominentemente."""
 
 
-class InventoryAgent(BaseAgent):
-    def __init__(self, client, db_path: str, model: str):
-        super().__init__(client, db_path, model)
+class InventoryAgent:
+    def __init__(self, model: str = AGENT_MODEL):
+        tools = make_tools(INVENTORY_TOOLS, execute_inventory_tool)
+        self._agent = build_agent(INSTRUCTIONS, tools, model)
 
     def run(self, query: str) -> str:
-        return self.execute(query, INVENTORY_TOOLS, SYSTEM_PROMPT)
-
-    def _execute_tool(self, tool_name: str, tool_input: dict) -> str:
-        return execute_inventory_tool(tool_name, tool_input, self.db_path)
+        return run_agent(self._agent, query)
