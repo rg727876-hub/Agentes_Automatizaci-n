@@ -133,7 +133,7 @@ def main():
     stats = memory.get_stats()
     print(f"OK ({stats['total_conversations']} conversaciones | {stats['total_products_indexed']} productos)")
 
-    orchestrator = OrchestratorAgent(client, DB_PATH, memory=memory)
+    orchestrator = OrchestratorAgent(memory=memory)
 
     print("Iniciando monitor de alertas...", end=" ", flush=True)
     start_background_monitor(DB_PATH)

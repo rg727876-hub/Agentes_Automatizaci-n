@@ -1,7 +1,10 @@
-from .base import BaseAgent
+"""Agente de Pronóstico de Demanda (LangGraph ReAct)."""
+from .base import build_agent, run_agent
+from .tool_adapter import make_tools
 from tools.demand_tools import DEMAND_TOOLS, execute_demand_tool
+from config import AGENT_MODEL
 
-SYSTEM_PROMPT = """Eres el Agente de Pronóstico de Demanda del sistema multiagente de gestión de retail.
+INSTRUCTIONS = """Eres el Agente de Pronóstico de Demanda del sistema multiagente de gestión de retail.
 Tu especialidad es predecir la demanda futura y gestionar riesgos de desabastecimiento.
 
 Responsabilidades:
@@ -15,12 +18,10 @@ Siempre responde en español con pronósticos claros e indicadores de riesgo.
 Clasifica los riesgos como CRITICO, ALTO o MEDIO y proporciona recomendaciones de acción."""
 
 
-class DemandForecastAgent(BaseAgent):
-    def __init__(self, client, db_path: str, model: str):
-        super().__init__(client, db_path, model)
+class DemandForecastAgent:
+    def __init__(self, model: str = AGENT_MODEL):
+        tools = make_tools(DEMAND_TOOLS, execute_demand_tool)
+        self._agent = build_agent(INSTRUCTIONS, tools, model)
 
     def run(self, query: str) -> str:
-        return self.execute(query, DEMAND_TOOLS, SYSTEM_PROMPT)
-
-    def _execute_tool(self, tool_name: str, tool_input: dict) -> str:
-        return execute_demand_tool(tool_name, tool_input, self.db_path)
+        return run_agent(self._agent, query)

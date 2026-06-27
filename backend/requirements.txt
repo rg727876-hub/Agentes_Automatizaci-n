@@ -6,3 +6,11 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 # Memoria vectorial: pgvector se usa vía SQL crudo (no requiere paquete extra).
 # La extensión `vector` debe estar habilitada en Supabase (schema.sql la crea).
+
+# --- LangChain / LangGraph / LangSmith ---
+# Framework de construcción de agentes, orquestación por grafos y observabilidad.
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-google-genai>=2.0.0   # modelo Gemini como ChatModel de LangChain
+langgraph>=0.3.0                 # create_react_agent + checkpointer de sesión
+langsmith>=0.1.0                 # tracing de tokens/costo/latencia (opt-in por API key)

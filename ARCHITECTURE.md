@@ -14,9 +14,18 @@ cada cosa nueva que agreguemos, y cómo se despliega en **AWS App Runner**.
 
 Es una aplicación web de un solo servicio: **una API FastAPI que también sirve el
 frontend estático**. La inteligencia está en un **orquestador** que coordina 6
-agentes especializados (Gemini con *function calling*). Los datos viven en
+agentes especializados. La orquestación y los agentes están construidos sobre
+**LangChain + LangGraph** (cada agente es un grafo ReAct autónomo); el modelo es
+**Gemini** expuesto como ChatModel vía `langchain-google-genai`. La observabilidad
+(tokens/costo/latencia) se hace con **LangSmith** (opt-in). Los datos viven en
 **PostgreSQL (Supabase)** y la **memoria semántica** usa **pgvector** sobre esa
 misma base.
+
+> **Stack de agentes (resumen):** LangChain = construcción · LangGraph =
+> orquestación (`create_react_agent`, checkpointer de sesión) · LangSmith =
+> observabilidad. La capa `llm.py` centraliza el modelo + caché de respuestas. El
+> adaptador `agents/tool_adapter.py` convierte las herramientas de `tools/` en
+> `StructuredTool` con validación Pydantic, sin reescribir la lógica de negocio.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -61,7 +70,8 @@ todos los módulos.
 | Capa | Carpeta | Responsabilidad | Regla de oro |
 |---|---|---|---|
 | **Presentación** | `backend/api/` | Endpoints REST, validación de entrada/salida (Pydantic), serialización. | No contiene lógica de negocio: delega en agentes o tools. |
-| **Orquestación / Agentes** | `backend/agents/` | Razonamiento con Gemini, enrutado de consultas, *function calling*. | Los agentes llaman a `tools/`, nunca a la BD directamente. |
+| **Orquestación / Agentes** | `backend/agents/` | Razonamiento con LangGraph (`create_react_agent`), enrutado/delegación, herramientas. | Los agentes llaman a `tools/`, nunca a la BD directamente. |
+| **Capa LLM** | `backend/llm.py` | Crea el ChatModel de Gemini (LangChain), caché de respuestas y activa LangSmith. | Único lugar que instancia el modelo; el resto pide `get_llm()`. |
 | **Dominio / Servicios** | `backend/tools/` | Lógica de negocio y consultas: inventario, ventas, demanda, compras, etc. | Devuelven JSON (str). Único lugar con SQL de negocio. |
 | **Memoria** | `backend/memory/` | Memoria semántica (embeddings + búsqueda vectorial) sobre pgvector. | Interfaz estable; el resto del sistema no sabe que por debajo es pgvector. |
 | **Datos** | `backend/database/` | Conexión a Postgres, esquema (DDL) y datos semilla. | Fuente de verdad del modelo: `schema.sql`. |
@@ -132,11 +142,19 @@ Para que el proyecto siga ordenado a medida que crece, sigue estos patrones.
 4. La lógica pesada **no** va en el router: va en `tools/` o en un agente.
 
 ### 4.2 Un agente nuevo
-1. Crea `backend/agents/<nombre>.py` heredando de `BaseAgent`.
-2. Define sus `tools` (esquema OpenAPI-like) e implementa `_execute_tool`.
-3. Regístralo en `agents/__init__.py` y en `OrchestratorAgent._agents` +
-   `_ORCHESTRATOR_TOOL_DEFS` (`invoke_<nombre>_agent`).
-4. Actualiza el `SYSTEM_PROMPT` del orquestador para que sepa cuándo usarlo.
+1. Crea `backend/agents/<nombre>.py` con una clase que en `__init__` arme sus
+   herramientas con `make_tools(...)` (reusa los `*_TOOLS` y `execute_*_tool` de
+   `tools/`) y llame a `build_agent(INSTRUCTIONS, tools, model)`. Expón `run(query)`
+   que delegue en `run_agent(self._agent, query)`.
+2. Define `INSTRUCTIONS` (las instrucciones de dominio). El prompt final es
+   dinámico: `base.make_dynamic_prompt` le inyecta la fecha en cada turno.
+3. Regístralo en `agents/__init__.py` y en `OrchestratorAgent._specialists` +
+   la lista `_HANDOFFS` (`invoke_<nombre>_agent`) del orquestador.
+4. Actualiza `INSTRUCTIONS` del orquestador para que sepa cuándo delegarle.
+
+> Las herramientas se definen igual que antes (dict OpenAPI-like en `tools/`); el
+> adaptador las convierte a `StructuredTool` automáticamente. No se hereda de
+> `BaseAgent` (eliminado): el patrón ahora es composición sobre `create_react_agent`.
 
 ### 4.3 Una herramienta (tool) de negocio
 1. Crea/edita `backend/tools/<dominio>_tools.py`.
@@ -187,6 +205,9 @@ Toda la configuración entra por **variables de entorno** (cargadas con
 | `ALERT_CHECK_INTERVAL` | ❌ | Minutos entre revisiones de alertas. |
 | `ENABLE_ALERT_MONITOR` | ❌ | `true` para arrancar el monitor de alertas en la web. |
 | `PORT` | ❌ | Puerto de escucha (App Runner / contenedor). Por defecto 8000. |
+| `LANGSMITH_API_KEY` | ❌ | Activa el tracing de LangSmith (tokens/costo/latencia). Sin ella, el sistema funciona igual sin trazar. |
+| `LANGSMITH_PROJECT` | ❌ | Nombre del proyecto en LangSmith (por defecto `inventario-retail`). |
+| `LLM_TEMPERATURE` | ❌ | Temperatura de los agentes (por defecto `0.0`). |
 
 > **Producción:** no se sube `.env`. Las credenciales se cargan en App Runner
 > como *environment variables* o, mejor, referenciando **AWS Secrets Manager**.
@@ -273,5 +294,6 @@ servicio sigue sirviendo el frontend y expone el error en ese endpoint.
 | Historial de sesión | En memoria de proceso. | Persistir por sesión (tabla o Redis) si se escala horizontalmente. |
 | Monitor de alertas | Hilo en el proceso web (opt-in). | Job externo con EventBridge Scheduler. |
 | Autenticación | API abierta. | API key / JWT + CORS restringido. |
-| Observabilidad | `print()`. | Logging estructurado + métricas (CloudWatch). |
+| Observabilidad | LangSmith (opt-in) traza tokens/costo/latencia de los agentes; el resto sigue con `print()`. | Logging estructurado + métricas (CloudWatch) para lo no-LLM. |
+| Historial de sesión del orquestador | `MemorySaver` de LangGraph en memoria de proceso (thread `default`). | Checkpointer persistente (Postgres/Redis) y `thread_id` por usuario al escalar. |
 | Tests | Solo smoke test de BD. | Tests de unidad para `tools/` y de integración para `api/`. |
