@@ -30,6 +30,7 @@ from .demand import DemandForecastAgent
 from .suppliers import SupplierAgent
 from .purchasing import PurchasingAgent
 from .reports import ReportAgent
+from .deep.agent import DeepRAGAgent
 from .reflex import reflex_response
 
 INSTRUCTIONS = """Eres el Orquestador Central del sistema multiagente de gestión de inventario retail.
@@ -45,6 +46,9 @@ AGENTES DISPONIBLES (cada uno es una herramienta de delegación):
 5. invoke_purchasing_agent   - Órdenes de compra, reabastecimiento, seguimiento de pedidos
 6. invoke_report_agent       - Reportes ejecutivos completos, KPIs gerenciales, análisis integral
                                (también puede enviar el reporte por correo electrónico)
+7. invoke_deep_agent         - Razonamiento profundo con verificación: planifica, busca en el
+                               catálogo (búsqueda semántica), redacta y AUTO-VERIFICA que la
+                               respuesta esté sustentada en los datos antes de entregarla
 
 PROTOCOLO DE DECISIÓN:
 - Para consultas simples de stock o alertas → usa invoke_inventory_agent
@@ -53,6 +57,9 @@ PROTOCOLO DE DECISIÓN:
 - Para evaluación de proveedores → usa invoke_supplier_agent
 - Para crear órdenes o gestionar compras → usa invoke_purchasing_agent
 - Para reportes completos o análisis ejecutivos → usa invoke_report_agent
+- Para preguntas abiertas o comparativas sobre el CATÁLOGO de productos que exijan una
+  respuesta cuidadosamente sustentada (recomendaciones razonadas, comparaciones, búsqueda
+  semántica de productos) donde la veracidad sea crítica → usa invoke_deep_agent
 - Para consultas complejas → combina múltiples agentes secuencialmente
 
 REGLAS DE COMPORTAMIENTO PROACTIVO (MUY IMPORTANTE):
@@ -77,6 +84,9 @@ _HANDOFFS = [
      "Delega en el Agente de Compras: crear órdenes, reabastecimiento y seguimiento de pedidos."),
     ("invoke_report_agent", "report",
      "Delega en el Agente de Reportes: informes ejecutivos, KPIs y análisis integral (puede enviarlo por email)."),
+    ("invoke_deep_agent", "deep",
+     "Delega en el Agente de Razonamiento Profundo (RAG con auto-verificación): para preguntas "
+     "abiertas o comparativas sobre el catálogo donde la respuesta debe estar sustentada y verificada."),
 ]
 
 
@@ -96,6 +106,10 @@ class OrchestratorAgent:
             "purchasing": PurchasingAgent(),
             "report": ReportAgent(),
         }
+        # El Deep Agent es RAG: solo se registra si hay memoria vectorial (su
+        # fuente de verdad). Sin memoria, el handoff se omite silenciosamente.
+        if memory is not None:
+            self._specialists["deep"] = DeepRAGAgent(memory=memory)
         self._checkpointer = MemorySaver()
         self._agent = create_react_agent(
             model=get_llm(ORCHESTRATOR_MODEL),
@@ -109,6 +123,9 @@ class OrchestratorAgent:
     def _build_handoff_tools(self) -> list:
         tools = []
         for tool_name, key, desc in _HANDOFFS:
+            if key not in self._specialists:
+                continue  # especialista no disponible (p. ej. deep sin memoria)
+
             def _make(agent_key):
                 def _delegate(query: str) -> str:
                     return self._specialists[agent_key].run(query)

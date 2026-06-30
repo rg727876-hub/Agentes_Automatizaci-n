@@ -27,8 +27,10 @@ AGENT_MODEL = "gemini-3.1-flash-lite"
 LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.0"))
 
 # Memoria vectorial (pgvector). Modelo de embeddings de Gemini y su dimensión.
-# text-embedding-004 -> 768 dimensiones (debe coincidir con vector(768) en schema.sql).
-EMBED_MODEL = "text-embedding-004"
+# gemini-embedding-001 emite 3072 dims por defecto; pedimos EMBED_DIM (768)
+# explícitamente para que coincida con vector(768) en schema.sql.
+# (El antiguo text-embedding-004 fue retirado: devuelve 404 en la API actual.)
+EMBED_MODEL = "gemini-embedding-001"
 EMBED_DIM = 768
 
 MAX_ITERATIONS = 10
@@ -70,3 +72,22 @@ def setup_langsmith() -> bool:
     os.environ["LANGCHAIN_API_KEY"] = LANGSMITH_API_KEY
     os.environ["LANGCHAIN_PROJECT"] = LANGSMITH_PROJECT
     return True
+
+
+# ---------------------------------------------------------------------------
+# Seguridad de la API
+# ---------------------------------------------------------------------------
+# Clave para proteger los endpoints REST. Si está VACÍA, la auth está desactivada
+# (modo desarrollo). En producción, defínela y envíala en el header `X-API-Key`.
+API_KEY = os.environ.get("API_KEY", "")
+
+# Orígenes permitidos por CORS (lista separada por comas). Por defecto, el mismo
+# origen (el frontend se sirve desde el propio servicio). Usa "*" solo en dev.
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+
+# Interruptor maestro de operaciones de ESCRITURA (mutaciones + envío de email).
+# En False, el sistema queda en modo solo-lectura: los agentes pueden consultar
+# pero no modificar datos ni enviar correos. Control de vulnerabilidad directo.
+ENABLE_WRITE_TOOLS = os.environ.get("ENABLE_WRITE_TOOLS", "true").lower() in ("1", "true", "yes")
