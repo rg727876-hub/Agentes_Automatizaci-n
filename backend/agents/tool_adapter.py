@@ -8,12 +8,22 @@ Beneficio extra (seguridad): el esquema de argumentos se genera con **Pydantic**
 a partir del `input_schema` que ya definías, así LangChain valida los argumentos
 ANTES de tocar la base de datos. Tipos incorrectos se rechazan solos.
 """
+import json
 from typing import Optional
 
 from pydantic import Field, create_model
 from langchain_core.tools import StructuredTool
 
-from config import DB_PATH
+from config import DB_PATH, ENABLE_WRITE_TOOLS
+
+# Herramientas que MUTAN datos o tienen efectos externos (envío de email).
+# Se controlan con ENABLE_WRITE_TOOLS y se auditan en cada invocación.
+WRITE_TOOLS = {
+    "update_stock_quantity",
+    "create_purchase_order",
+    "update_order_status",
+    "send_report_email",
+}
 
 # Mapeo del tipo declarado (OpenAPI-like) al tipo Python para Pydantic.
 _PY_TYPES = {
@@ -61,9 +71,21 @@ def make_tools(tool_defs: list, executor, needs_db_path: bool = True) -> list:
         args_model = _args_model(td)
 
         def _make_runner(name, exec_fn, with_db):
+            is_write = name in WRITE_TOOLS
+
             def _run(**kwargs):
                 # Quita los opcionales no provistos para no pisar defaults del dominio.
                 clean = {k: v for k, v in kwargs.items() if v is not None}
+                if is_write:
+                    # Control de vulnerabilidad: bloquea mutaciones en solo-lectura.
+                    if not ENABLE_WRITE_TOOLS:
+                        return json.dumps({
+                            "error": "Operación de escritura deshabilitada (modo solo-lectura). "
+                                     "Activa ENABLE_WRITE_TOOLS para permitirla.",
+                            "tool": name,
+                        }, ensure_ascii=False)
+                    # Auditoría: deja traza de toda escritura con sus argumentos.
+                    print(f"[AUDITORÍA] Escritura '{name}' args={clean}")
                 if with_db:
                     return exec_fn(name, clean, DB_PATH)
                 return exec_fn(name, clean)

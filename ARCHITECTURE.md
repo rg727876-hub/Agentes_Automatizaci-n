@@ -281,8 +281,24 @@ servicio sigue sirviendo el frontend y expone el error en ese endpoint.
 - Conexión a Postgres con `sslmode=require`.
 - SSL de salida saneado por `fix_ssl.py` (certifi) en Windows; en Linux/contenedor
   es inocuo.
-- *(Pendiente)* La API hoy es abierta. Antes de exponerla públicamente conviene
-  añadir autenticación (API key / JWT) y CORS explícito.
+- **Autenticación de la API (`api/security.py`):** los endpoints de datos
+  (`chat`, `dashboard`, `catalog`, `memory`) exigen el header `X-API-Key` cuando
+  `API_KEY` está configurada. Es opt-in: sin `API_KEY` la API queda abierta (modo
+  desarrollo) y se avisa en los logs. `/api/health` queda público para el health
+  check de App Runner.
+- **CORS (`app.py`):** restringido a `ALLOWED_ORIGINS` (lista por env). Vacío =
+  sin CORS cross-origin (el frontend se sirve desde el mismo origen).
+- **Validación de entrada:** todos los argumentos de las herramientas se validan
+  con **Pydantic** (esquema generado en `agents/tool_adapter.py`) antes de tocar
+  la BD; el SQL es parametrizado en `tools/`.
+- **Operaciones de escritura (`ENABLE_WRITE_TOOLS`):** las herramientas que mutan
+  datos o envían email (`update_stock_quantity`, `create_purchase_order`,
+  `update_order_status`, `send_report_email`) se pueden apagar globalmente (modo
+  solo-lectura) y se **auditan** en los logs en cada invocación.
+- *(Próximo paso)* Para un frontend en navegador, la API key queda expuesta en el
+  cliente; el upgrade natural es **login con JWT por usuario**. La confirmación
+  humana previa a cada escritura (human-in-the-loop) se puede añadir con el
+  mecanismo `interrupt` de LangGraph.
 
 ---
 

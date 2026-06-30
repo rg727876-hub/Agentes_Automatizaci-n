@@ -19,6 +19,8 @@ crean desde `database/schema.sql` (fuente de verdad) al iniciar el sistema.
 import json
 import uuid
 
+from google.genai import types
+
 from config import EMBED_MODEL, EMBED_DIM
 from database import get_connection
 
@@ -32,12 +34,21 @@ class VectorMemory:
     # ------------------------------------------------------------------
     # Embeddings
     # ------------------------------------------------------------------
+    def _embed_config(self) -> types.EmbedContentConfig:
+        # gemini-embedding-001 emite 3072 dims por defecto; fijamos la dimensión
+        # para que coincida con vector(EMBED_DIM) en pgvector.
+        return types.EmbedContentConfig(output_dimensionality=self.embed_dim)
+
     def _embed(self, text: str) -> list:
-        resp = self.client.models.embed_content(model=self.embed_model, contents=text)
+        resp = self.client.models.embed_content(
+            model=self.embed_model, contents=text, config=self._embed_config()
+        )
         return list(resp.embeddings[0].values)
 
     def _embed_batch(self, texts: list) -> list:
-        resp = self.client.models.embed_content(model=self.embed_model, contents=texts)
+        resp = self.client.models.embed_content(
+            model=self.embed_model, contents=texts, config=self._embed_config()
+        )
         return [list(e.values) for e in resp.embeddings]
 
     @staticmethod
